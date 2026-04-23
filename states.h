@@ -1,9 +1,13 @@
+#ifndef STATES_H
+#define STATES_H
+
 #include <stdint.h>
 
 typedef enum {
     STATE_INIT,
     STATE_MENU,
     STATE_BATTERY_CHECK,
+    STATE_GPS_VIEW,
     STATE_SOS_CONFIRM,
     STATE_SOS_COUNTDOWN,
     STATE_GPS_CHECK,
