@@ -1,13 +1,11 @@
-#ifndef STATES_H
-#define STATES_H
-
 #include <stdint.h>
 
 typedef enum {
     STATE_INIT,
-    STATE_IDLE,
     STATE_MENU,
     STATE_BATTERY_CHECK,
+    STATE_SOS_CONFIRM,
+    STATE_SOS_COUNTDOWN,
     STATE_GPS_CHECK,
     STATE_SOS_ARMING,
     STATE_SOS_FORMAT,
@@ -17,9 +15,9 @@ typedef enum {
     STATE_LOW_POWER,
     STATE_ERROR,
     STATE_SHUTDOWN,
-    STATE_WAYPOINT_CONFIRM,
+    STATE_WAYPOINT_SAVE,
     STATE_WAYPOINT_SAVED,
-    STATE_WAYPOINT_SELECT_DELETE
+    STATE_WAYPOINT_LIST
 } DeviceState;
 
 void        system_init(void);
