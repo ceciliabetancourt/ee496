@@ -1,12 +1,16 @@
 # MCU and clock
 MCU = atmega1284p
-F_CPU = 20000000UL
+F_CPU = 7372800UL
 
 # Programmer (change if needed)
 PROGRAMMER = usbtiny
 
+# Fuses
+fuses:
+	avrdude -c $(PROGRAMMER) -p m1284p -B 50 -U lfuse:w:0xE0:m
+
 # Files
-SRC = test.c
+SRC = gps_test.c gps.c display.c
 TARGET = main
 
 # Compiler flags
@@ -31,5 +35,6 @@ clean:
 
 
 # RUN THIS FIRST: avrdude -c usbtiny -p m1284p -B 50 -U lfuse:w:0xE0:m
+# I added a fuses section above so shouldn't have to do above step
 # THEN MAKE FUSES
 # THEN MAKE FLASH
