@@ -364,18 +364,21 @@ void state_machine_run(uint16_t elapsed_ms) {
 
             if (button_down(SOS)) {
                 oled_clear(0xF);
-                if(button_hold_time(SOS) < 1000)
+                if(button_hold_time(SOS) < 1000) {
                     oled_clear(0xF);
                     draw_string(10, 50, "3 seconds remaining", 1, 0x0);
                     oled_update();
-                else if((button_hold_time(SOS) > 1000) && (button_hold_time(SOS) < 2000))
+                }
+                else if((button_hold_time(SOS) > 1000) && (button_hold_time(SOS) < 2000)) {
                     oled_clear(0xF);
                     draw_string(10, 50, "2 seconds remaining", 1, 0x0);
                     oled_update();
-                else if((button_hold_time(SOS) > 2000) && (button_hold_time(SOS) < 3000))
+                }
+                else if((button_hold_time(SOS) > 2000) && (button_hold_time(SOS) < 3000)) {
                     oled_clear(0xF);
                     draw_string(10, 50, "1 second remaining", 1, 0x0);
                     oled_update();
+                }
             }
 
             if (sos_time_remaining() > 0) {
