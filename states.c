@@ -346,13 +346,10 @@ void state_machine_run(uint16_t elapsed_ms) {
                 previous_state = current_state;
             }
 
-            // TODO: implement get_coordinates() in gps.c
-            if (coordinates_valid) {
+            if (coordinates_valid && button_down(SOS)) {
                 current_state = STATE_SOS_ARMING;
-            } else {
-                // GPS failed — back to menu
-                // TODO: show error message before returning
-                current_state = STATE_MENU;
+            } else if (!coordinates_valid) {
+                current_state = STATE_IDLE;
             }
             break;
 
@@ -360,13 +357,34 @@ void state_machine_run(uint16_t elapsed_ms) {
         case STATE_SOS_ARMING:
             if (state_changed()) {
                 oled_clear(0xF);
-                draw_string(10, 40, "sos armed!", 1, 0x0);
-                draw_string(10, 60, "formatting...", 1, 0x0);
+                draw_string(10, 40, "sos arming!", 1, 0x0);
                 oled_update();
                 previous_state = current_state;
             }
-            flag_sos_rx   = 0;
-            current_state = STATE_SOS_FORMAT;
+
+            if (button_down(SOS)) {
+                oled_clear(0xF);
+                if(button_hold_time(SOS) < 1000)
+                    oled_clear(0xF);
+                    draw_string(10, 50, "3 seconds remaining", 1, 0x0);
+                    oled_update();
+                else if((button_hold_time(SOS) > 1000) && (button_hold_time(SOS) < 2000))
+                    oled_clear(0xF);
+                    draw_string(10, 50, "2 seconds remaining", 1, 0x0);
+                    oled_update();
+                else if((button_hold_time(SOS) > 2000) && (button_hold_time(SOS) < 3000))
+                    oled_clear(0xF);
+                    draw_string(10, 50, "1 second remaining", 1, 0x0);
+                    oled_update();
+            }
+
+            if (sos_time_remaining() > 0) {
+                current_state = STATE_SOS_ARMING;
+            } else if (sos_hold_complete()) {
+                current_state = STATE_SOS_FORMAT;
+            } else {
+                current_state = STATE_IDLE;
+            }
             break;
 
         // ── SOS FORMAT ────────────────────────────────────────
