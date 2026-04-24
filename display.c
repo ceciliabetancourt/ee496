@@ -7,7 +7,6 @@
 #define F_CPU 8000000UL
 #endif
 
-
 #define OLED_RST_PORT  PORTD
 #define OLED_RST_DDR   DDRD
 #define OLED_RST_PIN   PD6
