@@ -6,7 +6,7 @@
 
 #define BAUD 9600
 #ifndef F_CPU
-#define F_CPU 16000000UL
+#define F_CPU 8000000UL
 #endif
 #define UBRR_VAL (F_CPU/16/BAUD - 1)
 
