@@ -9,6 +9,7 @@
 #include <avr/sleep.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
+#include <string.h>
 
 void draw_string(uint8_t x, uint8_t y, const char *str, uint8_t scale, uint8_t color);
 
@@ -41,6 +42,10 @@ static uint8_t  countdown_value = COUNTDOWN_START;
 static uint16_t countdown_timer = 0;
 #define COUNTDOWN_STEP_MS    1000
 
+#define SOS_HOLD_COUNTDOWN_START 3
+static uint8_t  sos_hold_countdown_value = SOS_HOLD_COUNTDOWN_START;
+static uint16_t sos_hold_countdown_timer = 0;
+
 // ── battery refresh ───────────────────────────────────────────
 #define BATT_REFRESH_MS      2000
 static uint16_t batt_timer = 0;
@@ -48,6 +53,8 @@ static uint16_t batt_timer = 0;
 // ── GPS view refresh ──────────────────────────────────────────
 #define GPS_REFRESH_MS       1000
 static uint16_t gps_view_timer = 0;
+static uint8_t coordinates_valid = 0;
+static GPS_Data current_gps_data;
 
 // ── GPS check timeout ─────────────────────────────────────────
 #define GPS_TIMEOUT_MS       60000   // 60 seconds
@@ -85,18 +92,30 @@ static uint8_t state_changed(void) {
 // ── float to string (4 decimal places) ───────────────────────
 static void float_to_str(float val, char *buf) {
     uint8_t i = 0;
-    if (val < 0) { buf[i++] = '-'; val = -val; }
+
+    if (val < 0) {
+        buf[i++] = '-';
+        val = -val;
+    }
+
     uint16_t int_part = (uint16_t)val;
-    uint16_t dec_part = (uint16_t)((val - int_part) * 10000);
+    uint16_t dec_part = (uint16_t)((val - int_part) * 10000 + 0.5);
+
+    if (dec_part >= 10000) {
+        int_part++;
+        dec_part = 0;
+    }
+
     if (int_part >= 100) buf[i++] = '0' + (int_part / 100);
     if (int_part >= 10)  buf[i++] = '0' + ((int_part % 100) / 10);
     buf[i++] = '0' + (int_part % 10);
+
     buf[i++] = '.';
     buf[i++] = '0' + (dec_part / 1000);
     buf[i++] = '0' + ((dec_part % 1000) / 100);
     buf[i++] = '0' + ((dec_part % 100) / 10);
     buf[i++] = '0' + (dec_part % 10);
-    buf[i]   = '\0';
+    buf[i] = '\0';
 }
 
 // ── draw functions ────────────────────────────────────────────
@@ -108,8 +127,8 @@ static void draw_menu(void) {
     draw_string(20, 46, menu_index == MENU_GPS          ? "> gps coords"    : "  gps coords",    1, 0x0);
     draw_string(20, 64, menu_index == MENU_WAYPOINT_SAVE? "> save waypoint" : "  save waypoint", 1, 0x0);
     draw_string(20, 82, menu_index == MENU_WAYPOINT_LIST? "> waypoint list" : "  waypoint list", 1, 0x0);
-    draw_string(20, 105, "up/dn:scroll",  1, 0x0);
-    draw_string(20, 116, "right:select",  1, 0x0);
+    draw_string(20, 105, "up/down: scroll",  1, 0x0);
+    draw_string(30, 116, "right: select",  1, 0x0);
     oled_update();
 }
 
@@ -149,21 +168,45 @@ static void draw_gps_view(void) {
     oled_clear(0xF);
     draw_string(22, 5, "gps coords", 1, 0x0);
 
+    draw_string(10, 45, "acquiring fix...", 1, 0x0);
+    draw_string(10, 65, "please wait",      1, 0x0);
+    oled_update();
+
+    coordinates_valid = gps_read(&current_gps_data);
+
+    oled_clear(0xF);
+    draw_string(22, 5, "gps coords", 1, 0x0);
+
     if (!coordinates_valid) {
         draw_string(10, 45, "acquiring fix...", 1, 0x0);
         draw_string(10, 65, "please wait",      1, 0x0);
     } else {
-        float_to_str(gps_data.latitude,  lat_str);
-        float_to_str(gps_data.longitude, lon_str);
-        draw_string(20, 28, "lat: ", 1, 0x0); draw_string(50, 28, lat_str, 1, 0x0);
-        draw_string(20, 48, "lon: ", 1, 0x0); draw_string(50, 48, lon_str, 1, 0x0);
-        time_str[0]='0'+(gps_data.hour/10);   time_str[1]='0'+(gps_data.hour%10);
-        time_str[2]=':';
-        time_str[3]='0'+(gps_data.minute/10); time_str[4]='0'+(gps_data.minute%10);
-        time_str[5]=':';
-        time_str[6]='0'+(gps_data.second/10); time_str[7]='0'+(gps_data.second%10);
-        time_str[8]='\0';
-        draw_string(20, 68, "utc: ",   1, 0x0); draw_string(50, 68, time_str, 1, 0x0);
+        float_to_str(current_gps_data.latitude,  lat_str);
+        float_to_str(current_gps_data.longitude, lon_str);
+        draw_string(20, 28, "lat: ", 1, 0x0); 
+        draw_string(50, 28,  lat_str, 1, 0x0);
+        draw_string(20, 48, "lon: ", 1, 0x0); 
+        draw_string(50, 48, lon_str, 1, 0x0);
+        int hour = current_gps_data.hour;
+        int minute = current_gps_data.minute;
+        int second = current_gps_data.second;
+        
+        // Convert UTC → PDT
+        hour -= 7;
+        if (hour < 0) {
+            hour += 24;
+        }
+        // Format string
+        time_str[0] = '0' + (hour / 10);
+        time_str[1] = '0' + (hour % 10);
+        time_str[2] = ':';
+        time_str[3] = '0' + (minute / 10);
+        time_str[4] = '0' + (minute % 10);
+        time_str[5] = ':';
+        time_str[6] = '0' + (second / 10);
+        time_str[7] = '0' + (second % 10);
+        time_str[8] = '\0';
+        draw_string(20, 68, "pdt: ",   1, 0x0); draw_string(50, 68, time_str, 1, 0x0);
         draw_string(20, 88, "fix: ok", 1, 0x0);
     }
     draw_string(20, 108, "left: back", 1, 0x0);
@@ -177,6 +220,18 @@ static void draw_countdown(void) {
     char num[2]; num[0]='0'+countdown_value; num[1]='\0';
     draw_string(55, 65, num, 3, 0x0);
     draw_string(10, 108, "left: cancel",  1, 0x0);
+    oled_update();
+}
+
+static void draw_sos_countdown(void) {
+    oled_clear(0xF);
+    draw_string(10, 20, "sos button held", 1, 0x0);
+    draw_string(15, 45, "entering sos in:", 1, 0x0);
+    char num[2];
+    num[0] = '0' + sos_hold_countdown_value;
+    num[1] = '\0';
+    draw_string(55, 65, num, 3, 0x0);
+    draw_string(12, 108, "release to cancel", 1, 0x0);
     oled_update();
 }
 
@@ -212,10 +267,6 @@ static void draw_waypoint_list(uint8_t index) {
 // ── state machine ─────────────────────────────────────────────
 // NOTE: buttons_update() is called in main.c — NOT here
 void state_machine_run(uint16_t elapsed_ms) {
-
-    // always update GPS in background — non-blocking
-    gps_update();
-
     static uint8_t flag_sos_rx = 0;
 
     switch (current_state) {
@@ -239,7 +290,12 @@ void state_machine_run(uint16_t elapsed_ms) {
 
             if (power_is_low()) { state_enter_low_power(STATE_MENU); break; }
 
-            if (sos_hold_complete()) { current_state = STATE_SOS_CONFIRM; break; }
+            if (button_pressed(SOS)) {
+                sos_hold_countdown_value = SOS_HOLD_COUNTDOWN_START;
+                sos_hold_countdown_timer = 0;
+                current_state = STATE_SOS_HOLD_COUNTDOWN;
+                break;
+            }
 
             if (button_pressed(ON_OFF)) { current_state = STATE_SHUTDOWN; break; }
 
@@ -283,20 +339,34 @@ void state_machine_run(uint16_t elapsed_ms) {
                 previous_state = current_state;
                 batt_timer = 0;
             }
-            if (button_pressed(LEFT))     { current_state = STATE_MENU; break; }
-            if (sos_hold_complete())      { current_state = STATE_SOS_CONFIRM; break; }
+            if (button_pressed(LEFT)) { current_state = STATE_MENU; break; }
+            if (button_pressed(SOS)) {
+                sos_hold_countdown_value = SOS_HOLD_COUNTDOWN_START;
+                sos_hold_countdown_timer = 0;
+                current_state = STATE_SOS_HOLD_COUNTDOWN;
+                break;
+            }
             break;
 
         // ── GPS VIEW ──────────────────────────────────────────
         case STATE_GPS_VIEW:
-            gps_view_timer += elapsed_ms;
-            if (state_changed() || gps_view_timer >= GPS_REFRESH_MS) {
+            /*
+             * Blocking GPS read should happen only when entering this screen.
+             * Do not refresh every second, because each refresh would call gps_read()
+             * and block again.
+             */
+            if (state_changed()) {
                 draw_gps_view();
                 previous_state = current_state;
                 gps_view_timer = 0;
             }
-            if (button_pressed(LEFT))  { current_state = STATE_MENU; break; }
-            if (sos_hold_complete())   { current_state = STATE_SOS_CONFIRM; break; }
+            if (button_pressed(LEFT)) { current_state = STATE_MENU; break; }
+            if (button_pressed(SOS)) {
+                sos_hold_countdown_value = SOS_HOLD_COUNTDOWN_START;
+                sos_hold_countdown_timer = 0;
+                current_state = STATE_SOS_HOLD_COUNTDOWN;
+                break;
+            }
             break;
 
         // ── SOS CONFIRM ───────────────────────────────────────
@@ -322,6 +392,35 @@ void state_machine_run(uint16_t elapsed_ms) {
                 sos_triggered = 0;
                 current_state = STATE_MENU;
                 break;
+            }
+            break;
+
+        // ── SOS HOLD COUNTDOWN ─────────────────────────────────
+        case STATE_SOS_HOLD_COUNTDOWN:
+            sos_hold_countdown_timer += elapsed_ms;
+
+            if (state_changed()) {
+                draw_sos_countdown();
+                previous_state = current_state;
+            }
+
+            // Cancel if SOS button is released
+            if (!button_down(SOS)) {
+                current_state = STATE_MENU;
+                break;
+            }
+
+            if (sos_hold_countdown_timer >= COUNTDOWN_STEP_MS) {
+                sos_hold_countdown_timer = 0;
+                if (sos_hold_countdown_value > 0) {
+                    sos_hold_countdown_value--;
+                    draw_sos_countdown();
+                }
+
+                if (sos_hold_countdown_value == 0) {
+                    current_state = STATE_SOS_CONFIRM;
+                    break;
+                }
             }
             break;
 
@@ -359,37 +458,28 @@ void state_machine_run(uint16_t elapsed_ms) {
                 gps_timeout    = 0;
                 previous_state = current_state;
                 draw_gps_check(0);
-            }
 
-            gps_timeout += elapsed_ms;
+                /*
+                 * Blocking GPS read:
+                 * This uses the known-working gps_read() implementation.
+                 * While this runs, buttons/state updates pause until an RMC sentence is read.
+                 */
+                coordinates_valid = gps_read(&current_gps_data);
 
-            // redraw every second to show elapsed time
-            if (gps_timeout % 1000 < (uint32_t)elapsed_ms) {
-                draw_gps_check(gps_timeout);
-            }
+                if (coordinates_valid && sos_triggered) {
+                    gps_timeout   = 0;
+                    current_state = STATE_SOS_ARMING;
+                    break;
+                }
 
-            // got a fix — proceed to transmit
-            if (coordinates_valid && sos_triggered) {
-                gps_timeout   = 0;
-                current_state = STATE_SOS_ARMING;
-                break;
-            }
-
-            // 60 second timeout — no fix
-            if (gps_timeout >= GPS_TIMEOUT_MS) {
-                gps_timeout = 0;
                 oled_clear(0xF);
-                draw_string(10, 35, "gps timeout!", 1, 0x0);
-                draw_string(10, 55, "no fix found", 1, 0x0);
-                draw_string(10, 75, "try outside",  1, 0x0);
+                draw_string(10, 35, "gps no fix!", 1, 0x0);
+                draw_string(10, 55, "try outside", 1, 0x0);
+                draw_string(10, 75, "left: back",  1, 0x0);
                 oled_update();
-                _delay_ms(2000);
-                sos_triggered = 0;
-                current_state = STATE_MENU;
-                break;
             }
 
-            // LEFT cancels
+            // LEFT returns after the blocking read finishes
             if (button_pressed(LEFT)) {
                 gps_timeout   = 0;
                 sos_triggered = 0;
@@ -471,7 +561,12 @@ void state_machine_run(uint16_t elapsed_ms) {
                 oled_update();
                 previous_state = current_state;
             }
-            if (sos_hold_complete())  { current_state = STATE_SOS_CONFIRM; break; }
+            if (button_pressed(SOS)) {
+                sos_hold_countdown_value = SOS_HOLD_COUNTDOWN_START;
+                sos_hold_countdown_timer = 0;
+                current_state = STATE_SOS_HOLD_COUNTDOWN;
+                break;
+            }
             if (button_pressed(LEFT)) { current_state = STATE_MENU; break; }
             break;
 
@@ -485,12 +580,16 @@ void state_machine_run(uint16_t elapsed_ms) {
                 previous_state = current_state;
                 _delay_ms(2000);
             }
-            gps_sleep();
             set_sleep_mode(SLEEP_MODE_PWR_SAVE);
             sleep_enable(); sei(); sleep_cpu(); sleep_disable();
 
-            if (sos_hold_complete()) { gps_wake(); current_state = STATE_SOS_CONFIRM; break; }
-            if (!power_is_low())    { gps_wake(); current_state = pre_low_power_state; break; }
+            if (button_pressed(SOS)) {
+                sos_hold_countdown_value = SOS_HOLD_COUNTDOWN_START;
+                sos_hold_countdown_timer = 0;
+                current_state = STATE_SOS_HOLD_COUNTDOWN;
+                break;
+            }
+            if (!power_is_low()) { current_state = pre_low_power_state; break; }
             current_state = STATE_LOW_POWER;
             break;
         }
@@ -520,7 +619,6 @@ void state_machine_run(uint16_t elapsed_ms) {
             oled_update();
             _delay_ms(2000);
 
-            gps_sleep();
             oled_clear(0x0);
             oled_update();
 
