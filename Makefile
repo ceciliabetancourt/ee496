@@ -5,12 +5,9 @@ F_CPU = 7372800UL
 # Programmer (change if needed)
 PROGRAMMER = usbtiny
 
-# Fuses
-fuses:
-	avrdude -c $(PROGRAMMER) -p m1284p -B 50 -U lfuse:w:0xE0:m
-
 # Files
-SRC = gps_test.c gps.c display.c
+# main.c states.c display.c buttons.c gps.c power.c waypoint.c sos.c battery.c
+SRC = main.c states.c display.c buttons.c gps.c power.c waypoint.c sos.c battery.c
 TARGET = main
 
 # Compiler flags
@@ -35,6 +32,5 @@ clean:
 
 
 # RUN THIS FIRST: avrdude -c usbtiny -p m1284p -B 50 -U lfuse:w:0xE0:m
-# I added a fuses section above so shouldn't have to do above step
 # THEN MAKE FUSES
 # THEN MAKE FLASH
