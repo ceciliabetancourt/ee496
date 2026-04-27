@@ -1,5 +1,8 @@
-// get updates on battery and pass to rest of system
+#include "power.h"
+#include "battery.h"
 
-// function to get value of battery
+void power_init(void) {}
 
-// produce logic for low or critical power
+uint8_t power_is_low(void) {
+    return battery_is_low();
+}

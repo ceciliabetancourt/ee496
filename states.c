@@ -62,6 +62,16 @@ static uint32_t gps_timeout = 0;
 
 #define RETRY_LIMIT          3
 
+// ── waypoint save pending GPS ─────────────────────────────────
+static GPS_Data wp_save_gps;
+static uint8_t  wp_save_valid = 0;
+static uint8_t  wp_slot_index = 0;
+
+// ── waypoint navigation ───────────────────────────────────────
+#define NAV_REFRESH_MS       60000
+static uint16_t nav_timer      = 0;
+static uint8_t  nav_wp_index   = 0;
+
 void state_machine_set(DeviceState new_state) {
     current_state = new_state;
 }
@@ -252,15 +262,62 @@ static void draw_gps_check(uint32_t timeout_ms) {
     oled_update();
 }
 
-static void draw_waypoint_list(uint8_t index) {
-    char idx[3]; idx[0]='0'+index; idx[1]='\0';
+static void draw_slot_select(uint8_t selected) {
     oled_clear(0xF);
-    draw_string(20,  5, "waypoint list",   1, 0x0);
-    draw_string(20, 30, "waypoint: ",      1, 0x0);
-    draw_string(80, 30, idx,               1, 0x0);
-    draw_string(20, 55, "up/dn: scroll",   1, 0x0);
-    draw_string(20, 75, "right: navigate", 1, 0x0);
-    draw_string(20, 95, "left: back",      1, 0x0);
+    draw_string(10, 5, "select slot:", 1, 0x0);
+    for (uint8_t i = 0; i < MAX_WAYPOINTS; i++) {
+        uint8_t y = 22 + i * 20;
+        char line[18];
+        uint8_t j = 0;
+        line[j++] = (i == selected) ? '>' : ' ';
+        line[j++] = ' ';
+        line[j++] = 's'; line[j++] = 'l'; line[j++] = 'o';
+        line[j++] = 't'; line[j++] = ' ';
+        line[j++] = '0' + i;
+        line[j++] = ':'; line[j++] = ' ';
+        const char *status = waypoint_is_valid(i) ? "saved" : "empty";
+        while (*status) line[j++] = *status++;
+        line[j] = '\0';
+        draw_string(2, y, line, 1, 0x0);
+    }
+    oled_update();
+}
+
+static void draw_waypoint_list(uint8_t slot) {
+    uint8_t cnt = waypoint_count();
+    oled_clear(0xF);
+    draw_string(20, 5, "waypoint list", 1, 0x0);
+    if (cnt == 0) {
+        draw_string(10, 50, "no waypoints", 1, 0x0);
+    } else {
+        uint8_t pos = 0;
+        for (uint8_t i = 0; i <= slot; i++)
+            if (waypoint_is_valid(i)) pos++;
+        char line[20];
+        uint8_t i = 0;
+        const char *prefix = "waypoint: ";
+        while (*prefix) line[i++] = *prefix++;
+        line[i++] = '0' + pos;
+        const char *mid = " of ";
+        while (*mid) line[i++] = *mid++;
+        line[i++] = '0' + cnt;
+        line[i] = '\0';
+        draw_string(5, 18, line, 1, 0x0);
+
+        Waypoint wp;
+        waypoint_get(slot, &wp);
+        char lat_str[12], lon_str[12];
+        float_to_str(wp.latitude,  lat_str);
+        float_to_str(wp.longitude, lon_str);
+        draw_string(2, 36, "lat:", 1, 0x0);
+        draw_string(32, 36, lat_str, 1, 0x0);
+        draw_string(2, 52, "lon:", 1, 0x0);
+        draw_string(32, 52, lon_str, 1, 0x0);
+
+        draw_string(10, 72, "up/dn: scroll",   1, 0x0);
+        draw_string(10, 88, "right: navigate", 1, 0x0);
+        draw_string(10, 104, "left: back",     1, 0x0);
+    }
     oled_update();
 }
 
@@ -320,7 +377,8 @@ void state_machine_run(uint16_t elapsed_ms) {
                         current_state  = STATE_GPS_VIEW;
                         break;
                     case MENU_WAYPOINT_SAVE:
-                        current_state = STATE_WAYPOINT_SAVE;
+                        wp_slot_index = 0;
+                        current_state = STATE_WAYPOINT_SLOT_SELECT;
                         break;
                     case MENU_WAYPOINT_LIST:
                         waypoint_list_index = 0;
@@ -350,15 +408,17 @@ void state_machine_run(uint16_t elapsed_ms) {
 
         // ── GPS VIEW ──────────────────────────────────────────
         case STATE_GPS_VIEW:
-            /*
-             * Blocking GPS read should happen only when entering this screen.
-             * Do not refresh every second, because each refresh would call gps_read()
-             * and block again.
-             */
             if (state_changed()) {
                 draw_gps_view();
                 previous_state = current_state;
                 gps_view_timer = 0;
+            }
+            if (!coordinates_valid) {
+                gps_view_timer += elapsed_ms;
+                if (gps_view_timer >= GPS_REFRESH_MS) {
+                    gps_view_timer = 0;
+                    draw_gps_view();
+                }
             }
             if (button_pressed(LEFT)) { current_state = STATE_MENU; break; }
             if (button_pressed(SOS)) {
@@ -650,18 +710,87 @@ void state_machine_run(uint16_t elapsed_ms) {
             break;
         }
 
+        // ── WAYPOINT SLOT SELECT ──────────────────────────────
+        case STATE_WAYPOINT_SLOT_SELECT:
+            if (state_changed()) {
+                draw_slot_select(wp_slot_index);
+                previous_state = current_state;
+            }
+            if (button_pressed(UP)) {
+                if (wp_slot_index > 0) { wp_slot_index--; draw_slot_select(wp_slot_index); }
+                break;
+            }
+            if (button_pressed(DOWN)) {
+                if (wp_slot_index < MAX_WAYPOINTS - 1) { wp_slot_index++; draw_slot_select(wp_slot_index); }
+                break;
+            }
+            if (button_pressed(RIGHT)) {
+                if (waypoint_is_valid(wp_slot_index))
+                    current_state = STATE_WAYPOINT_OVERWRITE_CONFIRM;
+                else
+                    current_state = STATE_WAYPOINT_SAVE;
+                break;
+            }
+            if (button_pressed(LEFT)) { current_state = STATE_MENU; break; }
+            break;
+
+        // ── WAYPOINT OVERWRITE CONFIRM ────────────────────────
+        case STATE_WAYPOINT_OVERWRITE_CONFIRM:
+            if (state_changed()) {
+                oled_clear(0xF);
+                char slot_line[16];
+                uint8_t si = 0;
+                const char *sp = "slot ";
+                while (*sp) slot_line[si++] = *sp++;
+                slot_line[si++] = '0' + wp_slot_index;
+                slot_line[si++] = ' ';
+                const char *sh = "has data";
+                while (*sh) slot_line[si++] = *sh++;
+                slot_line[si] = '\0';
+                draw_string(5,  20, slot_line,       1, 0x0);
+                draw_string(20, 45, "overwrite?",    1, 0x0);
+                draw_string(10, 70, "right: yes",    1, 0x0);
+                draw_string(10, 87, "left: no",      1, 0x0);
+                oled_update();
+                previous_state = current_state;
+            }
+            if (button_pressed(RIGHT)) { current_state = STATE_WAYPOINT_SAVE; break; }
+            if (button_pressed(LEFT))  { current_state = STATE_WAYPOINT_SLOT_SELECT; break; }
+            break;
+
         // ── WAYPOINT SAVE ─────────────────────────────────────
         case STATE_WAYPOINT_SAVE:
             if (state_changed()) {
                 oled_clear(0xF);
-                draw_string(10, 30, "save waypoint?", 1, 0x0);
-                draw_string(10, 55, "right: confirm", 1, 0x0);
-                draw_string(10, 75, "left: cancel",   1, 0x0);
+                draw_string(10, 5, "save waypoint", 1, 0x0);
+                draw_string(10, 35, "reading gps...", 1, 0x0);
+                oled_update();
+                wp_save_valid = gps_read(&wp_save_gps);
+                oled_clear(0xF);
+                draw_string(10, 5, "save waypoint", 1, 0x0);
+                if (wp_save_valid) {
+                    char lat_str[12], lon_str[12];
+                    float_to_str(wp_save_gps.latitude,  lat_str);
+                    float_to_str(wp_save_gps.longitude, lon_str);
+                    draw_string(2, 28, "lat:", 1, 0x0);
+                    draw_string(38, 28, lat_str, 1, 0x0);
+                    draw_string(2, 43, "lon:", 1, 0x0);
+                    draw_string(38, 43, lon_str, 1, 0x0);
+                    draw_string(10, 65, "right: confirm", 1, 0x0);
+                    draw_string(10, 80, "left: cancel",   1, 0x0);
+                } else {
+                    draw_string(10, 40, "no gps fix", 1, 0x0);
+                    draw_string(10, 65, "left: cancel",  1, 0x0);
+                }
                 oled_update();
                 previous_state = current_state;
             }
-            if (button_pressed(RIGHT)) { waypoint_save(); current_state = STATE_WAYPOINT_SAVED; break; }
-            if (button_pressed(LEFT))  { current_state = STATE_MENU; break; }
+            if (wp_save_valid && button_pressed(RIGHT)) {
+                waypoint_save_to(wp_slot_index, wp_save_gps.latitude, wp_save_gps.longitude);
+                current_state = STATE_WAYPOINT_SAVED;
+                break;
+            }
+            if (button_pressed(LEFT)) { current_state = STATE_MENU; break; }
             break;
 
         // ── WAYPOINT SAVED ────────────────────────────────────
@@ -679,25 +808,117 @@ void state_machine_run(uint16_t elapsed_ms) {
         // ── WAYPOINT LIST ─────────────────────────────────────
         case STATE_WAYPOINT_LIST:
             if (state_changed()) {
+                // start at first valid slot
+                waypoint_list_index = 0;
+                for (uint8_t i = 0; i < MAX_WAYPOINTS; i++) {
+                    if (waypoint_is_valid(i)) { waypoint_list_index = i; break; }
+                }
                 draw_waypoint_list(waypoint_list_index);
                 previous_state = current_state;
             }
             if (button_pressed(UP)) {
-                if (waypoint_list_index > 0) {
-                    waypoint_list_index--;
-                    draw_waypoint_list(waypoint_list_index);
+                for (int8_t i = waypoint_list_index - 1; i >= 0; i--) {
+                    if (waypoint_is_valid(i)) {
+                        waypoint_list_index = i;
+                        draw_waypoint_list(waypoint_list_index);
+                        break;
+                    }
                 }
                 break;
             }
             if (button_pressed(DOWN)) {
-                if (waypoint_list_index < MAX_WAYPOINTS - 1) {
-                    waypoint_list_index++;
-                    draw_waypoint_list(waypoint_list_index);
+                for (uint8_t i = waypoint_list_index + 1; i < MAX_WAYPOINTS; i++) {
+                    if (waypoint_is_valid(i)) {
+                        waypoint_list_index = i;
+                        draw_waypoint_list(waypoint_list_index);
+                        break;
+                    }
                 }
                 break;
             }
-            if (button_pressed(RIGHT)) { break; } // TODO: navigate to waypoint
+            if (button_pressed(RIGHT)) {
+                if (waypoint_is_valid(waypoint_list_index)) {
+                    nav_wp_index  = waypoint_list_index;
+                    nav_timer     = NAV_REFRESH_MS;
+                    current_state = STATE_WAYPOINT_NAV;
+                }
+                break;
+            }
             if (button_pressed(LEFT))  { current_state = STATE_MENU; break; }
+            break;
+
+        // ── WAYPOINT NAV ──────────────────────────────────────
+        case STATE_WAYPOINT_NAV:
+            if (state_changed()) {
+                previous_state = current_state;
+            }
+            nav_timer += elapsed_ms;
+            if (nav_timer >= NAV_REFRESH_MS) {
+                nav_timer = 0;
+                GPS_Data nav_gps;
+                uint8_t nav_valid = gps_read(&nav_gps);
+                oled_clear(0xF);
+                char idx_str[3] = {'0' + nav_wp_index, '\0'};
+                draw_string(2, 5, "waypoint: ", 1, 0x0);
+                draw_string(62, 5, idx_str, 1, 0x0);
+                if (nav_valid) {
+                    Waypoint wp;
+                    waypoint_get(nav_wp_index, &wp);
+                    uint32_t dist_m;
+                    uint16_t bearing;
+                    const char *cardinal;
+                    waypoint_navigate(nav_gps.latitude, nav_gps.longitude,
+                                      wp.latitude, wp.longitude,
+                                      &dist_m, &bearing, &cardinal);
+                    if (dist_m < 30) {
+                        draw_string(20, 50, "arrived!", 1, 0x0);
+                    } else {
+                        // bearing string: "315 deg nw"
+                        char bear_str[12];
+                        uint8_t bi = 0;
+                        uint16_t b = bearing;
+                        if (b >= 100) bear_str[bi++] = '0' + b/100;
+                        if (b >= 10)  bear_str[bi++] = '0' + (b%100)/10;
+                        bear_str[bi++] = '0' + b%10;
+                        bear_str[bi++] = ' '; bear_str[bi++] = 'd';
+                        bear_str[bi++] = 'e'; bear_str[bi++] = 'g';
+                        bear_str[bi++] = ' ';
+                        const char *cp = cardinal;
+                        while (*cp) bear_str[bi++] = *cp++;
+                        bear_str[bi] = '\0';
+                        draw_string(2, 28, bear_str, 1, 0x0);
+
+                        // distance string
+                        char dist_str[12];
+                        uint8_t di = 0;
+                        if (dist_m < 200) {
+                            // show in metres
+                            uint16_t dm = (uint16_t)dist_m;
+                            if (dm >= 100) dist_str[di++] = '0' + dm/100;
+                            if (dm >= 10)  dist_str[di++] = '0' + (dm%100)/10;
+                            dist_str[di++] = '0' + dm%10;
+                            dist_str[di++] = ' '; dist_str[di++] = 'm';
+                        } else {
+                            // show in km with 1 decimal
+                            uint16_t km_int = (uint16_t)(dist_m / 1000);
+                            uint8_t  km_dec = (uint8_t)((dist_m % 1000) / 100);
+                            if (km_int >= 100) dist_str[di++] = '0' + km_int/100;
+                            if (km_int >= 10)  dist_str[di++] = '0' + (km_int%100)/10;
+                            dist_str[di++] = '0' + km_int%10;
+                            dist_str[di++] = '.';
+                            dist_str[di++] = '0' + km_dec;
+                            dist_str[di++] = ' '; dist_str[di++] = 'k'; dist_str[di++] = 'm';
+                        }
+                        dist_str[di] = '\0';
+                        draw_string(2, 46, dist_str, 1, 0x0);
+                    }
+                } else {
+                    draw_string(2, 40, "no gps fix", 1, 0x0);
+                }
+                draw_string(2, 100, "left: back", 1, 0x0);
+                oled_update();
+            }
+            if (button_pressed(LEFT)) { current_state = STATE_WAYPOINT_LIST; break; }
             break;
     }
 }

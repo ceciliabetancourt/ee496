@@ -1,7 +1,5 @@
-// file for formatting message and communicating with antenna
+#include "sos.h"
 
-// sos initilization (checking gps and modem)
+uint8_t ack_received = 0;
 
-// sos formatting of message
-
-// sos attempting to send (success or failure? how many attempts?)
+void sos_init(void) {}

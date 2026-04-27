@@ -1,22 +1,16 @@
-// initialization for the machine as well as the general loop where 
-// everything will be run
-
 #include "states.h"
-#include "gps.h"
 #include "buttons.h"
-#include "power.h"
-#include "display.h"
+#include <util/delay.h>
+
+#define LOOP_MS 10
 
 int main(void) {
-    // initialize system (system_init in states.c)
+    system_init();
 
     while (1) {
-        // check buttons
-        // check gps
-        // check power
-
-        // run state machine with given parameters
-        // update display as necessary
+        buttons_update(LOOP_MS);
+        state_machine_run(LOOP_MS);
+        _delay_ms(LOOP_MS);
     }
 
     return 0;
