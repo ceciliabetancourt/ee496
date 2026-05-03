@@ -85,7 +85,7 @@ COMPILE AND FLASH
 -----------------
 Toolchain: avr-gcc 7.3.0, avrdude 8.0.0 (from Arduino15 packages)
 
-Using Makefile (recommended):
+Using Makefile:
     make flash
 
 Manual compile and flash:
