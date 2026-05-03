@@ -1,0 +1,23 @@
+{
+    "configurations": [
+        {
+            "name": "Mac",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/Users/minagobran/Documents/Arduino/libraries/Adafruit_GPS_Library/src",
+                "/usr/local/avr/include",
+                "/Users/minagobran/Library/Arduino15/packages/arduino/tools/avr-gcc/7.3.0-atmel3.6.1-arduino7/avr/include"
+            ],
+            "defines": [
+                "F_CPU=20000000UL",
+                "__AVR_ATmega1284P__"
+            ],
+            "compilerPath": "/usr/local/avr/bin/avr-gcc",
+            "cStandard": "c17",
+            "cppStandard": "c++14",
+            "intelliSenseMode": "gcc-x64",
+            "configurationProvider": "ms-vscode.makefile-tools"
+        }
+    ],
+    "version": 4
+}
